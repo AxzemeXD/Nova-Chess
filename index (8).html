@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chess Nova v0.2</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --bg: #09090b;
+            --panel: #18181b;
+            --primary: #06b6d4; /* teal-ish */
+            --accent: #7c3aed;
+            --text-main: #f4f4f5;
+            --text-muted: #a1a1aa;
+            --border: #27272a;
+
+            /* Analysis Colors */
+            --brilliant: #22d3ee; /* !! */
+            --best: #84cc16;      /* ★ */
+            --excellent: #10b981; /* check */
+            --book: #6366f1;      /* Book Move (Blue) */
+            --good: #a1a1aa;      /* normal */
+            --inacc: #facc15;     /* ?! */
+            --mistake: #f97316;   /* ? */
+            --blunder: #ef4444;   /* ?? */
+        }
+
+        * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            margin: 0; background: var(--bg); color: var(--text-main);
+            font-family: 'Manrope', sans-serif; height: 100vh; overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+
+        /* --- LAYOUT --- */
+        .app-container { display: flex; height: 100%; width: 100%; }
+        
+        /* LEFT: BOARD */
+        .stage-area {
+            flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: radial-gradient(circle at center, #1e1e24 0%, #000 100%);
+            position: relative;
+        }
+
+        .board-wrapper {
+            width: 90vmin; height: 90vmin; max-width: 650px; max-height: 650px;
+            display: flex; gap: 10px; position: relative;
+        }
+
+        /* OVERLAYS FOR ICONS */
+        #board-overlays {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 100;
+        }
+        
+        .board-icon {
+            position: absolute; width: 12.5%; height: 12.5%;
+            display: flex; justify-content: flex-end; align-items: flex-start;
+            padding: 2px 4px;
+        }
+        
+        .icon-bubble {
+            width: 28px; height: 28px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 800; color: #fff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4); border: 2px solid #fff;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .eval-bar-container {
+            width: 20px; background: #27272a; border-radius: 4px; overflow: hidden;
+            position: relative; border: 1px solid #3f3f46;
+        }
+        #eval-fill {
+            position: absolute; bottom: 0; width: 100%; height: 50%;
+            background: #fff; transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #board { flex: 1; border-radius: 4px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+
+        /* RIGHT: SIDEBAR */
+        .sidebar {
+            width: 400px; background: var(--panel); border-left: 1px solid var(--border);
+            display: flex; flex-direction: column; z-index: 10;
+        }
+
+        /* Responsive */
+        @media (max-width: 950px) {
+            .app-container { flex-direction: column; }
+            .sidebar { width: 100%; height: 45%; border-left: none; border-top: 1px solid var(--border); }
+            .stage-area { height: 55%; }
+            .board-wrapper { width: 92vw; height: 92vw; gap: 5px; }
+            .eval-bar-container { width: 12px; }
+            .icon-bubble { width: 20px; height: 20px; font-size: 10px; border-width: 1.5px; }
+        }
+
+        /* --- COMPONENTS --- */
+        .header {
+            padding: 15px; background: #121212; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .brand { font-weight: 900; font-size: 18px; letter-spacing:-0.6px; background: linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip: text; color: transparent; }
+        
+        .game-meta {
+            padding: 10px 15px; background: #0f0f10; font-size: 13px; color: var(--text-muted);
+            border-bottom: 1px solid var(--border); display: flex; flex-direction:column; gap:4px;
+        }
+        .meta-row { display: flex; justify-content: space-between; align-items: center; }
+        .opening-tag { color: var(--book); font-weight: 600; display:flex; align-items:center; gap:6px; font-size:12px; }
+
+        .move-history { flex: 1; overflow-y: auto; background: #09090b; }
+        
+        .move-row {
+            display: grid; grid-template-columns: 40px 1fr 1fr;
+            border-bottom: 1px solid #18181b;
+        }
+        .move-num { font-size: 11px; color: #52525b; display: flex; align-items: center; justify-content: center; background: #101012; }
+        
+        .ply {
+            padding: 10px 12px; font-size: 14px; cursor: pointer; position: relative;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .ply:hover { background: #1f1f22; }
+        .ply.active { background: #27272a; border-left: 3px solid var(--primary); }
+        
+        .classification { font-weight: 800; font-size: 14px; margin-right: 6px; display:inline-block; width:15px; text-align:center; }
+        .eval-text { font-size: 10px; color: #71717a; font-family: monospace; }
+        .move-desc { font-size: 9px; color: #71717a; position: absolute; bottom: 2px; left: 12px; text-transform: uppercase; font-weight:700; }
+
+        .control-bar {
+            padding: 10px; background: #101012; border-top: 1px solid var(--border);
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+        }
+        .btn-ctrl { background: #27272a; color: #fff; border: none; padding: 12px; border-radius: 6px; font-size: 16px; cursor: pointer; transition: 0.2s; }
+        .btn-ctrl:active { transform: scale(0.96); }
+
+        .action-bar { padding: 10px; display: flex; gap: 10px; background: #09090b; }
+        .btn-sec { flex: 1; padding: 12px; border: 1px solid #3f3f46; background: transparent; color: var(--text-muted); border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; transition:0.2s; }
+        .btn-sec:hover { color: #fff; border-color: #fff; }
+
+        /* --- MODALS --- */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100;
+            display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px);
+        }
+        .card {
+            background: #18181b; border: 1px solid var(--border); width: 90%; max-width: 440px;
+            border-radius: 12px; padding: 30px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            max-height: 90vh; overflow-y: auto;
+        }
+        .btn-primary {
+            width: 100%; padding: 16px; margin-bottom: 12px;
+            background: var(--primary); border: none; border-radius: 8px;
+            color: white; font-weight: 700; font-size: 14px; cursor: pointer;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        
+        .progress-bar {
+            width: 100%; height: 6px; background: #27272a; border-radius: 3px;
+            margin: 20px 0; overflow: hidden;
+        }
+        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s; }
+
+        /* SETTINGS GRID */
+        .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left; margin-bottom: 25px; }
+        .setting-item { display: flex; flex-direction: column; gap: 5px; }
+        .setting-label { font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; }
+        .setting-input { 
+            background: #27272a; border: 1px solid #3f3f46; color: white; 
+            padding: 8px; border-radius: 6px; font-size: 12px; outline: none; width: 100%;
+        }
+        .btn-icon { background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:18px; position: absolute; top:20px; right:20px;}
+        .btn-tool { background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; margin-left:10px; }
+        .btn-tool:hover { color:white; }
+
+    </style>
+</head>
+<body>
+
+    <!-- START / LOGIN -->
+    <div id="modal-start" class="modal-overlay">
+        <div class="card">
+            <button class="btn-icon" onclick="$('#modal-settings').fadeIn()"><i class="fas fa-cog"></i></button>
+            <h1 style="margin:0 0 5px 0; color:white; letter-spacing:-1px;">CHESS NOVA</h1>
+            <p style="margin:0 0 8px 0; color:var(--text-muted); font-size:12px;">VERSION 0.2</p>
+
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <button class="btn-primary" style="flex:1; padding:10px 12px;" onclick="showAuth('login')">LOGIN</button>
+                <button class="btn-sec" style="flex:1; padding:10px 12px;" onclick="showAuth('register')">REGISTER</button>
+            </div>
+
+            <button class="btn-primary" onclick="App.startGame('cpu')">PLAY VS ENGINE</button>
+            <button class="btn-sec" onclick="App.startGame('local')" style="width:100%">LOCAL PVP</button>
+            
+            <div id="engine-status" style="margin-top:20px; font-size:11px; color:#52525b;">
+                <i class="fas fa-circle-notch fa-spin"></i> Engine Loading...
+            </div>
+
+            <div style="margin-top:12px; font-size:12px; color:var(--text-muted);">Tip: Create an account to save games & track stats.</div>
+        </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div id="modal-settings" class="modal-overlay" style="display:none; z-index: 110;">
+        <div class="card" style="text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2 style="margin:0; font-size:18px;">SETTINGS</h2>
+                <i class="fas fa-times" style="cursor:pointer;" onclick="$('#modal-settings').fadeOut()"></i>
+            </div>
+
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <span class="setting-label">Board Theme</span>
+                    <select class="setting-input" id="cfg-theme" onchange="Config.update()">
+                        <option value="blue">Deep Blue</option>
+                        <option value="green">Classic Green</option>
+                        <option value="brown">Wood</option>
+                        <option value="gray" selected>Slate (Default)</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <span class="setting-label">Piece Style</span>
+                    <select class="setting-input" id="cfg-pieces" onchange="Config.update()">
+                        <option value="wikipedia">Standard</option>
+                        <option value="alpha">Alpha</option>
+                        <option value="uscf">USCF</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <span class="setting-label">Engine Depth</span>
+                    <select class="setting-input" id="cfg-depth">
+                        <option value="5">Beginner (800)</option>
+                        <option value="10">Club (1500)</option>
+                        <option value="15" selected>Master (2200)</option>
+                        <option value="20">Grandmaster</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <span class="setting-label">Review Depth</span>
+                    <select class="setting-input" id="cfg-acc">
+                        <option value="quick">Fast</option>
+                        <option value="deep" selected>Deep Analysis</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <span class="setting-label">Sound FX</span>
+                    <select class="setting-input" id="cfg-sound">
+                        <option value="on" selected>On</option>
+                        <option value="off">Off</option>
+                    </select>
+                </div>
+                 <div class="setting-item">
+                    <span class="setting-label">Coordinates</span>
+                    <select class="setting-input" id="cfg-coords" onchange="Config.update()">
+                        <option value="true">Visible</option>
+                        <option value="false">Hidden</option>
+                    </select>
+                </div>
+                 <div class="setting-item">
+                    <span class="setting-label">Auto Queen</span>
+                    <select class="setting-input" id="cfg-promo">
+                        <option value="true">Always Queen</option>
+                        <option value="false">Ask (Not Impl)</option>
+                    </select>
+                </div>
+                 <div class="setting-item">
+                     <span class="setting-label">Move Speed</span>
+                    <select class="setting-input" id="cfg-anim" onchange="Config.update()">
+                        <option value="200">Fast</option>
+                        <option value="500" selected>Normal</option>
+                        <option value="0">Instant</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <span class="setting-label">Auto-save finished games</span>
+                    <select class="setting-input" id="cfg-autosave">
+                        <option value="true" selected>On</option>
+                        <option value="false">Off</option>
+                    </select>
+                </div>
+            </div>
+
+            <button class="btn-primary" onclick="$('#modal-settings').fadeOut()">SAVE & CLOSE</button>
+        </div>
+    </div>
+
+    <!-- ANALYSIS -->
+    <div id="modal-analysis" class="modal-overlay" style="display:none;">
+        <div class="card">
+            <h2 style="color:var(--primary)">ANALYZING GAME</h2>
+            <p style="color:#aaa; font-size:12px;">Reviewing Accuracy & Checking Book Moves...</p>
+            <div class="progress-bar"><div class="progress-fill" id="anal-prog"></div></div>
+            <div id="anal-text" style="font-size:12px; font-family:monospace;">0%</div>
+        </div>
+    </div>
+
+    <!-- GAME END -->
+    <div id="modal-end" class="modal-overlay" style="display:none;">
+        <div class="card">
+            <h2 id="end-title">GAME OVER</h2>
+            <div style="font-size:48px; font-weight:800; margin:10px 0; color:white;" id="end-acc">--</div>
+            <p style="color:#aaa; font-size:12px; margin-bottom:25px;">Estimated Accuracy</p>
+            
+            <button class="btn-primary" onclick="Analysis.startDeepAnalysis()">FULL GAME REVIEW</button>
+            <button class="btn-sec" onclick="location.reload()" style="width:100%">MAIN MENU</button>
+        </div>
+    </div>
+
+    <!-- AUTH (LOGIN / REGISTER) -->
+    <div id="modal-auth" class="modal-overlay" style="display:none; z-index:120;">
+        <div class="card" style="text-align:left; max-width:420px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 id="auth-title" style="margin:0; font-size:18px;">Login</h2>
+                <i class="fas fa-times" style="cursor:pointer;" onclick="$('#modal-auth').fadeOut()"></i>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <input id="auth-username" placeholder="Username" style="padding:10px; border-radius:6px; border:1px solid #333; background:#0b0b0c; color:#fff;" />
+                <input id="auth-password" placeholder="Password" type="password" style="padding:10px; border-radius:6px; border:1px solid #333; background:#0b0b0c; color:#fff;" />
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-primary" id="auth-do">Login</button>
+                    <button class="btn-sec" onclick="$('#auth-username').val(''); $('#auth-password').val('');">Clear</button>
+                </div>
+                <div id="auth-msg" style="color:#f88; font-size:12px; min-height:18px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <div class="stage-area">
+            <div class="board-wrapper">
+                <div class="eval-bar-container"><div id="eval-fill"></div></div>
+                <div id="board"></div>
+                <div id="board-overlays"></div>
+            </div>
+        </div>
+
+        <aside class="sidebar">
+            <div class="header">
+                <span class="brand">CHESS NOVA</span>
+                <div>
+                    <button class="btn-tool" onclick="App.flipBoard()" title="Flip Board"><i class="fas fa-retweet"></i></button>
+                    <button class="btn-tool" onclick="App.copyPGN()" title="Copy PGN"><i class="fas fa-copy"></i></button>
+                </div>
+            </div>
+            <div class="game-meta">
+                <div class="meta-row">
+                    <span id="status">White to Move</span>
+                    <span id="live-acc" style="font-size:12px; font-weight:700; color:var(--best)"></span>
+                </div>
+                <div class="meta-row" style="margin-top:5px;">
+                     <span class="opening-tag">
+                        <i class="fas fa-book"></i> <span id="opening-name">Starting Position</span>
+                     </span>
+                     <div style="display:flex; gap:8px; align-items:center;">
+                        <button class="btn-tool" onclick="showProfile()" title="Profile"><i class="fas fa-user"></i></button>
+                        <button class="btn-tool" onclick="showSaves()" title="Saved Games"><i class="fas fa-save"></i></button>
+                     </div>
+                </div>
+            </div>
+            
+            <div class="move-history" id="move-list"></div>
+
+            <div class="control-bar">
+                <button class="btn-ctrl" onclick="App.nav('start')"><i class="fas fa-fast-backward"></i></button>
+                <button class="btn-ctrl" onclick="App.nav('prev')"><i class="fas fa-step-backward"></i></button>
+                <button class="btn-ctrl" onclick="App.nav('next')"><i class="fas fa-step-forward"></i></button>
+                <button class="btn-ctrl" onclick="App.nav('end')"><i class="fas fa-fast-forward"></i></button>
+            </div>
+            <div class="action-bar">
+                <button class="btn-sec" onclick="App.resign()">RESIGN</button>
+                <button class="btn-sec" onclick="location.reload()">MENU</button>
+            </div>
+            <div style="padding:10px; border-top:1px solid #1f1f22; font-size:12px; color:var(--text-muted);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <div>
+                        <div style="font-weight:700;">Account</div>
+                        <div id="acct-name" style="font-size:12px; color:#9ca3af;">Not signed in</div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn-sec" onclick="showAuth('login')">Sign In</button>
+                        <button class="btn-sec" onclick="signOut()" id="btn-signout" style="display:none;">Sign Out</button>
+                    </div>
+                </div>
+                <div style="margin-top:8px; font-size:12px;">Quick actions: <button class="btn-tool" onclick="App.exportPGN()">Download PGN</button></div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+
+    <script>
+        /* =================================================================
+           SIMPLE CLIENT-SIDE AUTH (localStorage)
+           - Stores users in localStorage under key 'chessnova_users'
+           - Session stored as 'chessnova_session'
+           - Passwords are hashed with SHA-256 + random salt (client-side; not secure for production)
+           ================================================================= */
+        const Auth = {
+            usersKey: 'chessnova_users',
+            sessionKey: 'chessnova_session',
+
+            _loadUsers() {
+                try { return JSON.parse(localStorage.getItem(this.usersKey) || '{}'); } catch(e){ return {}; }
+            },
+            _saveUsers(u){ localStorage.setItem(this.usersKey, JSON.stringify(u)); },
+
+            async _hash(password, salt){
+                const enc = new TextEncoder();
+                const data = enc.encode(password + salt);
+                const h = await crypto.subtle.digest('SHA-256', data);
+                const arr = Array.from(new Uint8Array(h));
+                return arr.map(b => b.toString(16).padStart(2,'0')).join('');
+            },
+
+            async register(username, password){
+                username = (username || '').trim().toLowerCase();
+                if(!username || !password) throw 'Username and password required.';
+                const users = this._loadUsers();
+                if(users[username]) throw 'Username already exists.';
+                const salt = Array.from(crypto.getRandomValues(new Uint8Array(8))).map(n=>n.toString(16)).join('');
+                const hash = await this._hash(password, salt);
+                users[username] = { salt, hash, stats: { wins:0, losses:0, draws:0 }, saves: [] };
+                this._saveUsers(users);
+                return true;
+            },
+
+            async login(username, password){
+                username = (username || '').trim().toLowerCase();
+                const users = this._loadUsers();
+                if(!users[username]) throw 'No such user.';
+                const { salt, hash } = users[username];
+                const check = await this._hash(password, salt);
+                if(check !== hash) throw 'Invalid password.';
+                localStorage.setItem(this.sessionKey, username);
+                return true;
+            },
+
+            getCurrent() {
+                return localStorage.getItem(this.sessionKey) || null;
+            },
+
+            signOut(){ localStorage.removeItem(this.sessionKey); }
+        };
+
+        function showAuth(mode){
+            $('#auth-msg').text('');
+            $('#auth-username').val('');
+            $('#auth-password').val('');
+            $('#auth-title').text(mode === 'login' ? 'Login' : 'Register');
+            $('#auth-do').off('click');
+            if(mode === 'login'){
+                $('#auth-do').on('click', async ()=>{
+                    const u = $('#auth-username').val(); const p = $('#auth-password').val();
+                    try{ await Auth.login(u,p); updateAccountUI(); $('#modal-auth').fadeOut(); $('#modal-start').fadeOut(); App.startGame(App.mode || 'cpu'); }
+                    catch(e){ $('#auth-msg').text(e); }
+                });
+            } else {
+                $('#auth-do').on('click', async ()=>{
+                    const u = $('#auth-username').val(); const p = $('#auth-password').val();
+                    try{ await Auth.register(u,p); $('#auth-msg').css('color','#8f8').text('Registered! You may login now.'); }
+                    catch(e){ $('#auth-msg').css('color','#f88').text(e); }
+                });
+            }
+            $('#modal-auth').fadeIn();
+        }
+
+        function signOut(){ Auth.signOut(); updateAccountUI(); }
+
+        function updateAccountUI(){
+            const user = Auth.getCurrent();
+            if(user){ $('#acct-name').text(user); $('#btn-signout').show(); }
+            else { $('#acct-name').text('Not signed in'); $('#btn-signout').hide(); }
+        }
+
+        function showProfile(){
+            const user = Auth.getCurrent();
+            if(!user){ alert('Sign in to view profile and stats.'); showAuth('login'); return; }
+            const users = JSON.parse(localStorage.getItem(Auth.usersKey) || '{}');
+            const data = users[user] || { stats:{wins:0,losses:0,draws:0} };
+            alert(`Profile: ${user}\nWins: ${data.stats.wins}  Losses: ${data.stats.losses}  Draws: ${data.stats.draws}`);
+        }
+
+        function showSaves(){
+            const user = Auth.getCurrent();
+            if(!user){ alert('Sign in to view saved games.'); showAuth('login'); return; }
+            const users = JSON.parse(localStorage.getItem(Auth.usersKey) || '{}');
+            const arr = (users[user] && users[user].saves) || [];
+            if(arr.length === 0) return alert('No saved games.');
+            let list = arr.map((s,i)=> `${i+1}) ${s.name} — ${new Date(s.ts).toLocaleString()}`).join('\n');
+            const which = prompt('Saved games:\n' + list + '\nEnter number to load, or Cancel.');
+            if(!which) return;
+            const idx = parseInt(which) - 1;
+            if(isNaN(idx) || idx < 0 || idx >= arr.length) return alert('Invalid selection');
+            App.loadPGN(arr[idx].pgn);
+        }
+
+        /* =================================================================
+           AUDIO SYSTEM (unchanged)
+           ================================================================= */
+        const Sound = {
+            move: new Audio("data:audio/wav;base64,UklGRi4AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="),
+            ctx: null,
+
+            init() {
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+            },
+
+            play(type) {
+                if(Config.get('sound') === 'off') return;
+                if(!this.ctx) this.init();
+                if(this.ctx.state === 'suspended') this.ctx.resume();
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                if (type === 'move') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(300, this.ctx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.1);
+                } else if (type === 'capture') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(1500, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.15);
+                } else if (type === 'notify') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.5);
+                }
+            }
+        };
+
+        /* =================================================================
+           OPENING DATABASE (Lite) - unchanged
+           ================================================================= */
+        const OpeningDB = {
+            lines: {
+                "e2e4": "King's Pawn Opening",
+                "d2d4": "Queen's Pawn Opening",
+                "g1f3": "Réti Opening",
+                "c2c4": "English Opening",
+                "e2e4 c7c5": "Sicilian Defense",
+                "e2e4 e7e5": "Open Game",
+                "e2e4 e7e6": "French Defense",
+                "e2e4 c7c6": "Caro-Kann Defense",
+                "e2e4 d7d6": "Pirc Defense",
+                "e2e4 g8f6": "Alekhine's Defense",
+                "e2e4 c7c5 g1f3": "Sicilian: King's Knight",
+                "e2e4 c7c5 c2c3": "Sicilian: Alapin",
+                "e2e4 c7c5 g1f3 d7d6": "Sicilian: Classical",
+                "e2e4 e7e5 g1f3 b8c6 f1b5": "Ruy Lopez",
+                "e2e4 e7e5 g1f3 b8c6 f1c4": "Italian Game",
+                "e2e4 e7e5 g1f3 b8c6 d2d4": "Scotch Game",
+                "d2d4 d7d5": "Closed Game",
+                "d2d4 d7d5 c2c4": "Queen's Gambit",
+                "d2d4 d7d5 c2c4 c7c6": "Slav Defense",
+                "d2d4 g8f6": "Indian Defense",
+                "d2d4 g8f6 c2c4 g7g6": "King's Indian Defense",
+            },
+
+            check(game) {
+                const history = game.history({ verbose: true });
+                if(history.length === 0) return { name: "Starting Position", isBook: true };
+                let moveString = history.map(m => m.from + m.to).join(' ');
+                
+                if (this.lines[moveString]) return { name: this.lines[moveString], isBook: true };
+                return { name: "Midgame / Unknown", isBook: false };
+            }
+        };
+
+        /* =================================================================
+           CONFIG & SETTINGS
+           ================================================================= */
+        const Config = {
+            get(id) { return $(`#cfg-${id}`).val(); },
+            update() { if(App.board) App.board.orientation(App.board.orientation()); },
+            getPieceUrl(piece) {
+                const style = this.get('pieces');
+                if(style === 'wikipedia') return `https://chessboardjs.com/img/chesspieces/wikipedia/${piece}.png`;
+                if(style === 'alpha') return `https://chessboardjs.com/img/chesspieces/alpha/${piece}.png`;
+                if(style === 'uscf') return `https://chessboardjs.com/img/chesspieces/uscf/${piece}.png`;
+                return `https://chessboardjs.com/img/chesspieces/wikipedia/${piece}.png`;
+            }
+        };
+
+        /* =================================================================
+           ENGINE CORE
+           (same approach but wrapped to handle errors gracefully)
+           ================================================================= */
+        const Engine = {
+            worker: null,
+            isReady: false,
+            init() {
+                try {
+                    const blobContent = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');`;
+                    const blob = new Blob([blobContent], { type: 'application/javascript' });
+                    this.worker = new Worker(URL.createObjectURL(blob));
+                    this.worker.onmessage = (e) => {
+                        if (e.data === 'uciok') {
+                            this.isReady = true;
+                            $('#engine-status').html('<span style="color:#84cc16">● ENGINE READY</span>');
+                        }
+                        App.handleEngineMessage(e.data);
+                    };
+                    this.worker.postMessage('uci');
+                } catch(e) {
+                    $('#engine-status').text('FAILED TO LOAD ENGINE');
+                }
+            },
+            analyze(fen, depth) {
+                if(!this.isReady) return;
+                this.worker.postMessage('stop');
+                this.worker.postMessage(`position fen ${fen}`);
+                this.worker.postMessage(`go depth ${depth}`);
+            },
+            analyzeMultiPV(fen, depth, lines) {
+                if(!this.isReady) return;
+                this.worker.postMessage('stop');
+                this.worker.postMessage(`setoption name MultiPV value ${lines}`);
+                this.worker.postMessage(`position fen ${fen}`);
+                this.worker.postMessage(`go depth ${depth}`);
+            }
+        };
+
+        /* =================================================================
+           APP CONTROLLER (keeps original behavior but adds saves/stats)
+           ================================================================= */
+        const App = {
+            game: new Chess(),
+            board: null,
+            mode: 'cpu', 
+            viewIndex: -1, 
+            isReviewing: false,
+            currentOpening: "Starting Position",
+            analysisData: {},
+
+            init() { Engine.init(); updateAccountUI(); },
+
+            startGame(mode) {
+                this.mode = mode;
+                this.analysisData = {};
+                $('#modal-start').fadeOut(200);
+                Sound.init();
+
+                const pieceThemeFunc = (piece) => Config.getPieceUrl(piece);
+
+                // reset game
+                this.game = new Chess();
+
+                this.board = Chessboard('board', {
+                    draggable: true,
+                    position: 'start',
+                    pieceTheme: pieceThemeFunc,
+                    moveSpeed: parseInt(Config.get('anim')),
+                    snapbackSpeed: parseInt(Config.get('anim')),
+                    snapSpeed: parseInt(Config.get('anim')),
+                    showNotation: Config.get('coords') === 'true',
+                    onDragStart: this.onDragStart,
+                    onDrop: this.onDrop,
+                    onSnapEnd: () => this.board.position(this.game.fen())
+                });
+                
+                $(window).resize(this.board.resize);
+                this.renderMoveList();
+                this.updateStatus();
+            },
+
+            flipBoard() { this.board.flip(); setTimeout(() => this.renderBoardIcon(), 200); },
+
+            copyPGN() { navigator.clipboard.writeText(this.game.pgn()); const originalText = $('#status').text(); $('#status').text("PGN Copied to Clipboard!"); setTimeout(() => $('#status').text(originalText), 2000); },
+
+            exportPGN(){ const pgn = this.game.pgn(); const blob = new Blob([pgn], {type:'text/plain'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'chess_nova_game.pgn'; a.click(); URL.revokeObjectURL(url); },
+
+            loadPGN(pgn){ try{ const g = new Chess(); const ok = g.load_pgn(pgn); if(!ok) return alert('Invalid PGN'); this.game = g; this.board.position(this.game.fen()); this.renderMoveList(); this.updateStatus(); } catch(e){ alert('Failed to load PGN'); } },
+
+            onDragStart(source, piece) {
+                if (App.game.game_over() || App.isReviewing) return false;
+                if (App.mode === 'cpu' && piece.search(/^b/) !== -1) return false;
+            },
+
+            onDrop(source, target) {
+                let move = App.game.move({ from: source, to: target, promotion: 'q' });
+                if (move === null) return 'snapback';
+                
+                if(move.captured) Sound.play('capture');
+                else Sound.play('move');
+
+                App.renderMoveList();
+                App.updateStatus();
+
+                if (App.game.game_over()) { App.handleGameOver(); return; }
+
+                if (App.mode === 'cpu') {
+                    $('#status').text('Stockfish Thinking...');
+                    let skill = parseInt(Config.get('depth'));
+                    Engine.analyze(App.game.fen(), skill); 
+                } else {
+                    Engine.analyze(App.game.fen(), 12);
+                }
+            },
+
+            handleEngineMessage(msg) {
+                if (msg.includes('bestmove') && this.mode === 'cpu' && this.game.turn() === 'b' && !this.isReviewing) {
+                    let moveStr = msg.split('bestmove ')[1].split(' ')[0];
+                    let move = this.game.move({ from: moveStr.substring(0,2), to: moveStr.substring(2,4), promotion: 'q' });
+                    
+                    if(move.captured) Sound.play('capture');
+                    else Sound.play('move');
+
+                    this.board.position(this.game.fen());
+                    this.renderMoveList();
+                    this.updateStatus();
+                    if(this.game.game_over()) this.handleGameOver();
+                }
+
+                if (msg.includes('score cp')) {
+                    let score = parseInt(msg.split('score cp ')[1]);
+                    if (msg.includes(' b ')) score = -score; 
+                    if (this.game.turn() === 'b') score = -score; 
+                    this.setEvalBar(score);
+                } else if (msg.includes('mate')) {
+                    this.setEvalBar(msg.includes('mate -') ? -900 : 900);
+                }
+                
+                if (this.isReviewing) { Analysis.receiveMessage(msg); }
+            },
+
+            setEvalBar(cp) { let percent = 50 + (cp / 15); percent = Math.max(5, Math.min(95, percent)); $('#eval-fill').css('height', percent + '%'); if(percent > 50) $('#eval-fill').css('background', '#fff'); else $('#eval-fill').css('background', '#52525b'); },
+
+            updateStatus() {
+                let status = this.game.turn() === 'w' ? 'White to Move' : 'Black to Move';
+                if (this.game.in_check()) status = 'Check!';
+                $('#status').text(status);
+
+                const opData = OpeningDB.check(this.game);
+                if(opData.isBook) {
+                    this.currentOpening = opData.name;
+                    $('#opening-name').text(opData.name).css('color', 'var(--book)');
+                    $('.fa-book').css('color', 'var(--book)');
+                } else {
+                    if(this.game.history().length > 15) {
+                        $('#opening-name').text("Endgame").css('color', 'var(--text-muted)');
+                        $('.fa-book').css('color', 'var(--text-muted)');
+                    } else {
+                         $('#opening-name').text(this.currentOpening).css('color', 'var(--text-muted)');
+                         $('.fa-book').css('color', 'var(--text-muted)');
+                    }
+                }
+            },
+
+            handleGameOver() {
+                Sound.play('notify');
+                setTimeout(() => {
+                    $('#modal-end').fadeIn();
+                    let title = "DRAW";
+                    if(this.game.in_checkmate()) title = this.game.turn() === 'w' ? "BLACK WINS" : "WHITE WINS";
+                    $('#end-title').text(title);
+                    // update stats if user logged in
+                    const user = Auth.getCurrent();
+                    if(user){
+                        const users = JSON.parse(localStorage.getItem(Auth.usersKey) || '{}');
+                        const data = users[user] || { stats:{wins:0,losses:0,draws:0} };
+                        if(title === 'DRAW') data.stats.draws++;
+                        else if(title === 'WHITE WINS') { if(this.game.turn() === 'b') data.stats.wins++; else data.stats.losses++; }
+                        else if(title === 'BLACK WINS') { if(this.game.turn() === 'w') data.stats.wins++; else data.stats.losses++; }
+                        users[user] = data; localStorage.setItem(Auth.usersKey, JSON.stringify(users));
+                        if(Config.get('autosave') === 'true') saveCurrentGameToUser(user);
+                    }
+                }, 500);
+            },
+
+            resign() {
+                if(!this.game.game_over() && !this.isReviewing) {
+                    $('#modal-end').fadeIn();
+                    $('#end-title').text("RESIGNED");
+                    const user = Auth.getCurrent();
+                    if(user){ const users = JSON.parse(localStorage.getItem(Auth.usersKey) || '{}'); const data = users[user] || { stats:{wins:0,losses:0,draws:0} }; data.stats.losses++; users[user]=data; localStorage.setItem(Auth.usersKey, JSON.stringify(users)); if(Config.get('autosave') === 'true') saveCurrentGameToUser(user); }
+                }
+            },
+
+            nav(dir) {
+                let moves = this.game.history();
+                let max = moves.length - 1;
+
+                if (dir === 'start') this.viewIndex = -1;
+                if (dir === 'end') this.viewIndex = max;
+                if (dir === 'prev') this.viewIndex = Math.max(-1, this.viewIndex - 1);
+                if (dir === 'next') this.viewIndex = Math.min(max, this.viewIndex + 1);
+
+                if(dir === 'curr') { /* used by onclick */ }
+
+                let tempGame = new Chess();
+                for (let i = 0; i <= this.viewIndex; i++) tempGame.move(moves[i]);
+                this.board.position(tempGame.fen());
+
+                $('.ply').removeClass('active');
+                if (this.viewIndex >= 0) {
+                    $(`#ply-${this.viewIndex}`).addClass('active');
+                    this.renderBoardIcon();
+                } else {
+                    $('#board-overlays').empty();
+                }
+            },
+
+            renderBoardIcon() {
+                $('#board-overlays').empty();
+                let data = this.analysisData[this.viewIndex];
+                if (!data) return;
+                let move = this.game.history({ verbose:true })[this.viewIndex];
+                let square = move.to;
+                let fileMap = {a:0, b:1, c:2, d:3, e:4, f:5, g:6, h:7};
+                let file = fileMap[square[0]];
+                let rank = parseInt(square[1]) - 1;
+                let isWhite = this.board.orientation() === 'white';
+                let leftPct = isWhite ? (file * 12.5) : ((7 - file) * 12.5);
+                let topPct = isWhite ? ((7 - rank) * 12.5) : (rank * 12.5);
+                let iconHtml = `<div class="board-icon" style="left:${leftPct}%; top:${topPct}%"><div class="icon-bubble" style="background:${data.color}">${data.icon}</div></div>`;
+                $('#board-overlays').html(iconHtml);
+            },
+
+            renderMoveList() {
+                let moves = this.game.history({ verbose: true });
+                let html = '';
+                let tempMoveStr = [];
+
+                for (let i = 0; i < moves.length; i += 2) {
+                    let m1 = moves[i];
+                    let m2 = moves[i+1];
+                    
+                    tempMoveStr.push(m1.from + m1.to);
+                    let m1IsBook = OpeningDB.lines[tempMoveStr.join(' ')] ? true : false;
+                    
+                    let m2IsBook = false;
+                    if(m2) {
+                        tempMoveStr.push(m2.from + m2.to);
+                        m2IsBook = OpeningDB.lines[tempMoveStr.join(' ')] ? true : false;
+                    }
+
+                    if(m1IsBook && !this.analysisData[i]) { this.analysisData[i] = { icon: '<i class="fas fa-book"></i>', color: 'var(--book)' }; }
+                    if(m2IsBook && !this.analysisData[i+1]) { this.analysisData[i+1] = { icon: '<i class="fas fa-book"></i>', color: 'var(--book)' }; }
+
+                    let d1 = this.analysisData[i] || { icon:'', color:'' };
+                    let d2 = this.analysisData[i+1] || { icon:'', color:'' };
+
+                    let i1 = d1.icon || (m1IsBook ? '<i class="fas fa-book" style="font-size:10px;"></i>' : '');
+                    let i2 = d2.icon || (m2IsBook ? '<i class="fas fa-book" style="font-size:10px;"></i>' : '');
+                    let c1 = d1.color || (m1IsBook ? 'var(--book)' : '');
+                    let c2 = d2.color || (m2IsBook ? 'var(--book)' : '');
+
+                    html += `<div class="move-row">
+                        <div class="move-num">${Math.floor(i/2)+1}</div>
+                        
+                        <div class="ply" id="ply-${i}" onclick="App.viewIndex=${i}; App.nav('curr')">
+                            <span><span class="classification" id="cls-${i}" style="color:${c1}">${i1}</span>${m1.san}</span>
+                            <span class="eval-text" id="ev-${i}"></span>
+                            <span class="move-desc" id="desc-${i}" style="color:${c1}">${m1IsBook ? "BOOK" : ""}</span>
+                        </div>
+
+                        <div class="ply" ${m2 ? `id="ply-${i+1}" onclick="App.viewIndex=${i+1}; App.nav('curr')"` : 'style="opacity:0; pointer-events:none;"'}>
+                            <span><span class="classification" id="cls-${i+1}" style="color:${c2}">${i2}</span>${m2 ? m2.san : ''}</span>
+                            <span class="eval-text" id="ev-${i+1}"></span>
+                            <span class="move-desc" id="desc-${i+1}" style="color:${c2}">${m2IsBook ? "BOOK" : ""}</span>
+                        </div>
+                    </div>`;
+                }
+                $('#move-list').html(html);
+                if(!this.isReviewing) { const el = document.getElementById('move-list'); el.scrollTop = el.scrollHeight; }
+            }
+        };
+
+        /* =================================================================
+           ANALYSIS (unchanged)
+           ================================================================= */
+        const Analysis = {
+            queue: [],
+            currentStep: 0,
+            bufferMoves: [],
+            
+            startDeepAnalysis() {
+                $('#modal-end').fadeOut();
+                $('#modal-analysis').fadeIn();
+                App.isReviewing = true;
+                
+                this.queue = [];
+                let tempGame = new Chess();
+                let history = App.game.history({ verbose: true });
+                let moveStrList = [];
+                
+                history.forEach((move, index) => {
+                    let fenBefore = tempGame.fen(); 
+                    tempGame.move(move.san);
+                    moveStrList.push(move.from + move.to);
+                    let isBook = OpeningDB.lines[moveStrList.join(' ')] !== undefined;
+
+                    this.queue.push({
+                        index: index,
+                        fenBefore: fenBefore,
+                        playedMove: move.from + move.to,
+                        san: move.san,
+                        turn: move.color,
+                        captured: move.captured,
+                        isBook: isBook
+                    });
+                });
+
+                this.currentStep = 0;
+                this.analyzeNextStep();
+            },
+
+            analyzeNextStep() {
+                if (this.currentStep >= this.queue.length) { this.finishAnalysis(); return; }
+
+                let item = this.queue[this.currentStep];
+
+                if (item.isBook) { this.processBookMove(item); return; }
+
+                let pct = Math.round((this.currentStep / this.queue.length) * 100);
+                $('#anal-prog').css('width', pct + '%');
+                $('#anal-text').text(`Reviewing Move ${this.currentStep + 1} / ${this.queue.length}`);
+                
+                this.bufferMoves = [];
+                let isDeep = Config.get('acc') === 'deep';
+                let depth = isDeep ? 14 : 10;
+                let multipv = isDeep ? 3 : 1; 
+
+                Engine.analyzeMultiPV(item.fenBefore, depth, multipv);
+            },
+
+            processBookMove(item) {
+                let cls = { icon: '<i class="fas fa-book" style="font-size:10px"></i>', color: 'var(--book)', desc: 'BOOK' };
+                this.saveAndRender(item, cls, '');
+                this.currentStep++;
+                setTimeout(() => this.analyzeNextStep(), 50);
+            },
+
+            receiveMessage(msg) {
+                if (msg.includes(' multipv ') && msg.includes(' pv ')) {
+                    let parts = msg.split(' ');
+                    let rank = parseInt(parts[parts.indexOf('multipv') + 1]);
+                    let move = parts[parts.indexOf('pv') + 1];
+                    let scoreVal = 0;
+                    if(parts.indexOf('score') !== -1) { if(parts[parts.indexOf('score')+1] === 'cp') scoreVal = parseInt(parts[parts.indexOf('score')+2]); else scoreVal = 1000; }
+                    this.bufferMoves[rank] = { move: move, score: scoreVal };
+                }
+                
+                if (msg.includes('bestmove')) { this.processResult(); }
+            },
+
+            processResult() {
+                let item = this.queue[this.currentStep];
+                let played = item.playedMove;
+                let bestMoveObj = this.bufferMoves[1] || { move: '', score: 0 };
+                let bestMove = bestMoveObj.move;
+                
+                let rank = -1;
+                for(let i=1; i<this.bufferMoves.length; i++) { if (this.bufferMoves[i] && this.bufferMoves[i].move === played) { rank = i; break; } }
+                
+                let cls = { icon: '', color: '', desc: '' };
+                
+                if (played === bestMove) { cls = { icon: '★', color: 'var(--best)', desc: 'BEST' }; }
+                else if (rank === 2) { cls = { icon: '✓', color: 'var(--excellent)', desc: 'EXCELLENT' }; }
+                else if (rank === 3) { cls = { icon: '✓', color: 'var(--good)', desc: 'GOOD' }; }
+                else { if (item.captured) cls = { icon: '?', color: 'var(--mistake)', desc: 'MISTAKE' }; else cls = { icon: '?!', color: 'var(--inacc)', desc: 'INACCURACY' }; }
+
+                let s = bestMoveObj.score; if (item.turn === 'b') s = -s;
+                
+                this.saveAndRender(item, cls, (s/100).toFixed(2));
+
+                this.currentStep++;
+                this.analyzeNextStep();
+            },
+
+            saveAndRender(item, cls, scoreTxt) {
+                App.analysisData[item.index] = { icon: cls.icon, color: cls.color };
+                $(`#cls-${item.index}`).html(cls.icon).css('color', cls.color);
+                $(`#desc-${item.index}`).text(cls.desc).css('color', cls.color);
+                $(`#ev-${item.index}`).text(scoreTxt);
+            },
+
+            finishAnalysis() {
+                $('#modal-analysis').fadeOut();
+                App.nav('start');
+                let stars = $('.ply:contains("★")').length;
+                let books = $('.ply:contains("BOOK")').length;
+                let checks = $('.ply:contains("✓")').length;
+                let total = this.queue.length;
+                let acc = Math.round(((stars + books + (checks*0.7)) / total) * 100);
+                $('#live-acc').text(acc + '% ACCURACY');
+                alert(`Analysis Complete! Precision: ${acc}%`);
+            }
+        };
+
+        // Helper: save current game to user's saves
+        function saveCurrentGameToUser(user){
+            const users = JSON.parse(localStorage.getItem(Auth.usersKey) || '{}');
+            if(!users[user]) users[user] = { stats:{wins:0,losses:0,draws:0}, saves: [] };
+            const arr = users[user].saves || [];
+            const pgn = App.game.pgn();
+            arr.push({ name: `Game ${new Date().toLocaleString()}`, pgn, ts: Date.now() });
+            users[user].saves = arr;
+            localStorage.setItem(Auth.usersKey, JSON.stringify(users));
+            alert('Game saved to your account.');
+        }
+
+        /* Initialize app */
+        App.init();
+
+        // Small UI glue
+        updateAccountUI();
+
+        // Expose some functions to global so buttons can call
+        window.showAuth = showAuth; window.signOut = signOut; window.showProfile = showProfile; window.showSaves = showSaves; window.saveCurrentGameToUser = saveCurrentGameToUser; window.Auth = Auth; window.App = App; window.Analysis = Analysis; window.Engine = Engine; window.Config = Config; window.Sound = Sound;
+
+    </script>
+</body>
+</html>
